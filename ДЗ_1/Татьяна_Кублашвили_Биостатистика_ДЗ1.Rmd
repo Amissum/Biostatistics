@@ -1,0 +1,234 @@
+---
+title: "Татьяна_Кублашвили_Биостатистика_ДЗ_1"
+output: pdf_document
+date: "2025-04-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Установим требуемые библиотеки
+# install.packages(c("readxl", "dplyr", "ggpubr", "ggplot2", "tidyr", "openxlsx"))
+
+# Загрузка необходимых пакетов
+library(readxl)
+library(dplyr)
+library(ggpubr)
+library(ggplot2)
+library(tidyr)
+library(openxlsx)
+```
+
+# **Расчет описательных статистик**
+
+В RStudio создайте RMarkdown-файл и загрузите датасет pima ([pima.xlsx](https://lms-cdn.skillfactory.ru/assets/courseware/v1/127414e0936c7199c39d6e9a51d02f91/asset-v1:Skillfactory+MFTIBIO-2sem+2025+type@asset+block/pima.xlsx)).
+
+Рассчитайте число наблюдений, среднее, стандартное отклонение, 1-й и 3-й квартили, минимум и максимум для переменных glucose, pressure, mass.
+
+```{r}
+# загрузим датасет pima (находится в директории data)
+pima <- read.xlsx("data/pima.xlsx")
+# посмотрим на структуру данных
+str(pima)
+# посмотрим на первые 6 строк
+head(pima)
+# посмотрим на количество строк и столбцов
+dim(pima)
+# посмотрим на количество пропусков в каждом столбце
+colSums(is.na(pima)) # пропусков нет
+# посмотрим на количество уникальных значений в каждом столбце
+sapply(pima, function(x) length(unique(x)))
+```
+
+Рассчитайте число наблюдений, среднее, стандартное отклонение, 1-й и 3-й квартили, минимум и максимум для переменных glucose, pressure, mass.
+
+```{r}
+# Создаем функцию для расчета описательных статистик числовых непрерывных переменных
+descriptive_stats <- function(data, var) {
+  data %>%
+    summarise(
+      n = n(),
+      mean = mean(get(var), na.rm = TRUE),
+      sd = sd(get(var), na.rm = TRUE),
+      min = min(get(var), na.rm = TRUE),
+      q1 = quantile(get(var), 0.25, na.rm = TRUE),
+      q3 = quantile(get(var), 0.75, na.rm = TRUE),
+      max = max(get(var), na.rm = TRUE)
+    )
+}
+# Применяем функцию к переменным glucose, pressure, mass
+glucose_stats <- descriptive_stats(pima, "glucose")
+pressure_stats <- descriptive_stats(pima, "pressure")
+mass_stats <- descriptive_stats(pima, "mass")
+
+# Объединяем результаты в один датафрейм
+descriptive_stats_all <- bind_rows(
+  mutate(glucose_stats, variable = "glucose"),
+  mutate(pressure_stats, variable = "pressure"),
+  mutate(mass_stats, variable = "mass")
+)
+
+# Печатаем результаты
+print(descriptive_stats_all)
+```
+
+Рассчитайте описательную статистику для переменной diabetes.
+
+```{r}
+# Создаем функцию для расчета описательных статистик для категориальных переменных
+# (имеет значение только число наблюдений и частотность наблюдния)
+descriptive_stats_categorical <- function(data, var) {
+  data %>%
+    group_by(get(var)) %>%
+    summarise(
+      n = n(),
+      percent = n() / nrow(data) * 100
+    )
+}
+
+# Применяем функцию к переменной diabetes
+diabetes_stats <- descriptive_stats_categorical(pima, "diabetes")
+
+# Печатаем результаты
+print(diabetes_stats)
+
+# Значения округлим до 3 знаков
+diabetes_stats <- diabetes_stats %>%
+  mutate(percent = round(percent, 3))
+  
+# Построим круговую диаграмму для переменной percent (легенда = diabetes pos/neg percent). На самой диаграмме должны быть указаны проценты.
+ggplot(diabetes_stats, aes(x = "", y = percent, fill = as.factor(get("percent")))) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = paste0(percent, "%")), position = position_stack(vjust = 0.5)) +
+  labs(title = "Распределение переменной Diabetes", x = "", y = "") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 12)) +
+  scale_fill_manual(values = c("pink", "steelblue"), labels = c("Diabetes Pos", "Diabetes Neg")) +
+  guides(fill = guide_legend(title = "Diabetes Status"))
+```
+
+Создайте на основе переменной age новую переменную age_group, которая будет отражать следующие возрастные группы: 21–35, 36–49 и 50+. Посчитайте описательную статистику для новой переменной.
+
+```{r}
+# Создаем новую переменную age_group
+pima <- pima %>%
+  mutate(age_group = case_when(
+    age >= 21 & age <= 35 ~ "21-35",
+    age >= 36 & age <= 49 ~ "36-49",
+    age >= 50 ~ "50+"
+  ))
+# Рассчитываем описательную статистику для новой категориальной переменной age_group
+age_group_stats <- descriptive_stats_categorical(pima, "age_group")
+# Печатаем результаты
+print(age_group_stats)
+# Построим гистограмму для переменной age_group
+ggplot(pima, aes(x = age_group)) +
+  geom_bar(aes(y = after_stat(count)), fill = "steelblue") +
+  labs(title = "Распределение переменной Age Group",
+       x = "Age Group",
+       y = "Count") +
+  theme_minimal()
+```
+
+Постройте два ящика с усами для значений pos и neg соответственно переменной diabetes.
+
+```{r}
+# Создаем ящик с усами для переменной diabetes
+ggplot(pima, aes(x = diabetes, y = glucose)) +
+  geom_boxplot() +
+  labs(title = "Boxplot - Glucose по Diabetes Status",
+       x = "Diabetes Status",
+       y = "Glucose") +
+  theme_minimal()
+# Создаем ящик с усами для переменной diabetes
+ggplot(pima, aes(x = diabetes, y = pressure)) +
+  geom_boxplot() +
+  labs(title = "Boxplot - Pressure по Diabetes Status",
+       x = "Diabetes Status",
+       y = "Pressure") +
+  theme_minimal()
+```
+
+# **Использование основных статистических тестов и поправок на множественные сравнения.**
+
+Рассмотрите следующую статистическую гипотезу.
+
+Проводят некоторое исследование пациентов с артериальной гипертензией. Предположим, что внедрение нового препарата в среднем лучше снижает их давление по сравнению со стандартной терапией.
+
+Задайте seed для воспроизводимости результатов (функция set.seed()). Задайте размер выборки sample_size \<- 30. Задайте значение среднего систолического артериального давления до приема нового препарата и после.
+
+```{r}
+# Задаем seed для воспроизводимости результатов
+set.seed(42)
+# Задаем размер выборки
+sample_size <- 30
+# Задаем значение среднего систолического артериального давления до приема нового препарата
+mean_before <- 140
+# Задаем значение среднего систолического артериального давления после приема нового препарата
+mean_after <- 130
+# Генерируем выборку с нормальным распределением
+pressure_before <- rnorm(sample_size, mean = mean_before, sd = 10)
+pressure_after <- rnorm(sample_size, mean = mean_after, sd = 10)
+# Создаем датафрейм с данными
+pressure_data <- data.frame(
+  id = 1:sample_size,
+  pressure_before = pressure_before,
+  pressure_after = pressure_after
+)
+# Посмотрим на первые 6 строк
+head(pressure_data)
+# Посмотрим на структуру данных
+str(pressure_data)
+# Посмотрим на количество строк и столбцов
+dim(pressure_data)
+# Посмотрим на количество пропусков в каждом столбце
+colSums(is.na(pressure_data))
+# Посмотрим на количество уникальных значений в каждом столбце
+sapply(pressure_data, function(x) length(unique(x)))
+```
+
+Затем:
+
+1.  Сформулируйте нулевую и альтернативную гипотезы.
+2.  Определите уровень значимости.
+3.  Выберите и примените статистический тест для проверки гипотезы и аргументируйте свой выбор.
+4.  Оцените и прокомментируйте статистическую значимость.
+
+### Формулировка нулевой и альтернативной гипотез
+
+1.  Нулевая гипотеза (H0): Среднее давление до приема препарата равно среднему давлению после приема препарата.
+2.  Альтернативная гипотеза (H1): Среднее давление до приема препарата больше среднего давления после приема препарата.
+
+```{r}
+# Проверим нашу гипотезу:
+
+# 1. Определяем уровень значимости
+alpha <- 0.05
+
+# 2. Выбираем и применяем статистический тест
+# Мы будем использовать парный t-тест, так как у нас есть две связанные выборки (до и после приема препарата)
+t_test_result <- t.test(pressure_data$pressure_before, pressure_data$pressure_after, paired = TRUE)
+
+# 3. Оцениваем и комментируем статистическую значимость, сохраним выводы в переменную conclusion
+if (t_test_result$p.value < alpha) {
+  conclusion <- "Отвергаем нулевую гипотезу. Есть статистически значимые различия между средним давлением до и после приема препарата."
+} else {
+  conclusion <- "Не отвергаем нулевую гипотезу. Нет статистически значимых различий между средним давлением до и после приема препарата."
+}
+
+# Печатаем результаты t-теста
+print(t_test_result)
+
+# Печатаем вывод
+print(conclusion)
+```
+
+# **Выводы**
+
+В этом задании мы изучили, как рассчитывать описательные статистики для различных переменных в датасете pima. Мы также научились создавать новые переменные и визуализировать данные с помощью ящиков с усами. Наконец, мы провели статистический тест для проверки гипотезы о влиянии нового препарата на артериальное давление.

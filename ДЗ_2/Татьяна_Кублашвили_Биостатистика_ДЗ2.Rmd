@@ -1,0 +1,324 @@
+---
+title: "Татьяна_Кублашвили_Биостатистика_ДЗ_2"
+author: ""
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output: pdf_document
+---
+
+```{r}
+# Установим требуемые библиотеки
+install.packages(c("tidyverse", "car"))
+```
+
+```{r}
+# Загрузка необходимых пакетов
+library(tidyverse)
+library(car)
+library(pROC)
+library(powerSurvEpi)
+```
+
+# Подготовка данных
+
+Для выполнения первых двух заданий загрузите датасет Breast Cancer Wisconsin (датасет должен находиться в одной директории с файлом проекта).
+
+```{r}
+temp_file <- tempfile(fileext = ".csv")
+download.file("https://raw.githubusercontent.com/Aeverandi/biostat/refs/heads/main/wisconsin_breast_cancer.csv", temp_file, mode="wb")
+bc <- read_csv(temp_file,   col_types = cols(...33 = col_skip()))
+
+# Просмотр первых строк и названий колонок
+head(bc)
+colnames(bc)
+```
+
+**Набор данных Breast Cancer Wisconsin** содержит 30 морфометрических признаков, извлечённых из оцифрованных изображений тонкоигольных аспиратов (FNA). Мы сосредоточимся на усреднённых переменных:
+
+-   `radius_mean` — средний радиус
+-   `area_mean` — средняя площадь
+-   `perimeter_mean` — средний периметр
+-   `symmetry_mean` — средняя симметричность
+-   `texture_mean` — средняя текстура
+
+а также на столбце `diagnosis` с диагнозом (B — доброкачественная, M — злокачественная).
+
+```{r}
+# Перекодируем диагноз: M = 1, B = 0
+bc <- bc %>% mutate(malignant = ifelse(diagnosis == "M", 1, 0))
+```
+
+# 1. Линейные регрессионные модели
+
+**Задание:** Создайте регрессионную модель (или несколько моделей), которая описывала бы связь:
+
+-   среднего радиуса опухоли и средней площади;
+-   среднего периметра;
+-   средней симметричности.
+
+Постройте график (или графики, если моделей несколько), на котором отразите регрессионную прямую, и прокомментируйте свои находки.
+
+**Решение:** Исследуем, как *средний радиус* связан с другими характеристиками опухоли.
+
+## 1.1 Площадь от радиуса
+
+```{r}
+lm_area <- lm(area_mean ~ radius_mean, data = bc)
+summary(lm_area)
+```
+
+```{r}
+bc %>%
+  ggplot(aes(x = radius_mean, y = area_mean)) +
+    geom_point(alpha = .6) +
+    geom_smooth(method = "lm", se = TRUE, linewidth = .8) +
+    labs(x = "Средний радиус (пиксели)", y = "Средняя площадь (пиксели²)",
+         title = "Линейная зависимость между радиусом и площадью") +
+    theme_minimal()
+```
+
+**Комментарий.** Ожидаемо высокая \|R²\| (\> 0,9), так как площадь круга растёт квадратично с радиусом. Модель подтверждает почти детерминированную положительную связь.
+
+## 1.2 Периметр от радиуса
+
+```{r}
+lm_perim <- lm(perimeter_mean ~ radius_mean, data = bc)
+summary(lm_perim)
+```
+
+```{r}
+bc %>%
+  ggplot(aes(x = radius_mean, y = perimeter_mean)) +
+    geom_point(alpha = .6) +
+    geom_smooth(method = "lm", se = TRUE, linewidth = .8) +
+    labs(x = "Средний радиус (пиксели)", y = "Средний периметр (пиксели)",
+         title = "Зависимость периметра от радиуса") +
+    theme_minimal()
+```
+
+**Комментарий.** Периметр растёт линейно с радиусом (≈ 2πr), поэтому модель даёт почти идеальное соответствие (\|R²\| ≈ 1).
+
+## 1.3 Симметричность от радиуса
+
+```{r}
+lm_sym <- lm(symmetry_mean ~ radius_mean, data = bc)
+summary(lm_sym)
+```
+
+```{r}
+bc %>%
+  ggplot(aes(x = radius_mean, y = symmetry_mean)) +
+    geom_point(alpha = .6) +
+    geom_smooth(method = "lm", se = TRUE, linewidth = .8) +
+    labs(x = "Средний радиус (пиксели)", y = "Средняя симметричность (безразм.)",
+         title = "Зависимость симметричности от радиуса") +
+    theme_minimal()
+```
+
+**Комментарий.** Симметричность — характеристика формы, практически не зависящая от размера: наклон близок к нулю, объяснённая дисперсия минимальна (\|R²\| ≈ 0).
+
+# 2. Логистические модели для вероятности злокачественности
+
+**Задание:**
+
+Пусть колонка с диагнозом принимает следующие значения: злокачественная опухоль (M) — 1, а доброкачественная (B) — 0. Постройте модель (или несколько моделей), которая прогнозировала бы вероятность возникновения злокачественной опухоли:
+
+-   от среднего радиуса;
+
+-   средней площади;
+
+-   средней текстуры.
+
+Постройте графики. Создайте модель, которая бы прогнозировала вероятность возникновения злокачественной опухоли от всех трех перечисленных факторов.
+
+**Решение:**
+
+Теперь смоделируем вероятность злокачественной опухоли (*malignant* = 1) от морфометрических предикторов.
+
+## 2.1 Вероятность vs радиус
+
+```{r}
+logit_rad <- glm(malignant ~ radius_mean, data = bc, family = binomial)
+summary(logit_rad)
+```
+
+```{r}
+bc %>%
+  ggplot(aes(x = radius_mean, y = malignant)) +
+    geom_jitter(height = .02, width = 0, alpha = .5) +
+    stat_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE, linewidth = .8) +
+    labs(x = "Средний радиус (пиксели)", y = "Pr(злокач.)",
+         title = "Вероятность злокачественности от радиуса") +
+    theme_minimal()
+```
+
+**Вывод.** Более крупные опухоли значительно чаще оказываются злокачественными (OR \> 1, *p* \< 0,001).
+
+## 2.2 Вероятность vs площадь
+
+```{r}
+logit_area <- glm(malignant ~ area_mean, data = bc, family = binomial)
+summary(logit_area)
+```
+
+```{r}
+bc %>%
+  ggplot(aes(x = area_mean, y = malignant)) +
+    geom_jitter(height = .02, width = 0, alpha = .5) +
+    stat_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE, linewidth = .8) +
+    labs(x = "Средняя площадь (пиксели²)", y = "Pr(злокач.)",
+         title = "Вероятность злокачественности от площади") +
+    theme_minimal()
+```
+
+**Вывод.** Площадь также является сильным предиктором, что отражает её квадратичную связь с радиусом.
+
+## 2.3 Вероятность vs текстура
+
+```{r}
+logit_text <- glm(malignant ~ texture_mean, data = bc, family = binomial)
+summary(logit_text)
+```
+
+```{r}
+bc %>%
+  ggplot(aes(x = texture_mean, y = malignant)) +
+    geom_jitter(height = .02, width = 0, alpha = .5) +
+    stat_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE, linewidth = .8) +
+    labs(x = "Средняя текстура (безразм.)", y = "Pr(злокач.)",
+         title = "Вероятность злокачественности от текстуры") +
+    theme_minimal()
+```
+
+**Вывод.** Текстура демонстрирует более слабую, но достоверную связь: увеличение значения умеренно повышает риск злокачественности.
+
+## 2.4 Многомерная модель (радиус + площадь + текстура)
+
+```{r}
+logit_multi <- glm(malignant ~ radius_mean + area_mean + texture_mean, data = bc, family = binomial)
+summary(logit_multi)
+```
+
+```{r}
+vif(logit_multi)
+```
+
+Поскольку площадь почти пропорциональна квадрату радиуса, наблюдается мультиколлинеарность (высокие VIF). Следует оставить только один из коллинеарных факторов.
+
+```{r}
+logit_multi_1 <- glm(malignant ~ radius_mean + texture_mean, data = bc, family = binomial)
+summary(logit_multi_1)
+```
+
+```{r}
+logit_multi_2 <- glm(malignant ~ area_mean + texture_mean, data = bc, family = binomial)
+summary(logit_multi_2)
+```
+
+**Комментарий** В обоих случаях стало лучше, однако необходимо выбрать модель, обладающую наилучшей прогностической способностью. Для этих целей используем метрику AUC_ROC.
+
+```{r}
+auc_model_multi_1 <- auc(roc(bc$malignant ~ predict(logit_multi, type = "response")))
+cat("Area + Radius + Texture:\t", auc_model_multi_1, "\n")
+
+auc_model_multi_2 <- auc(roc(bc$malignant ~ predict(logit_multi_1, type = "response")))
+cat("Texture + Radius:\t", auc_model_multi_2, "\n")
+
+auc_model_multi_3 <- auc(roc(bc$malignant ~ predict(logit_multi_2, type = "response")))
+cat("Texture + Area:\t", auc_model_multi_3, "\n")
+
+# Сравним с однофакторными моделями
+auc_model_1 <- auc(roc(bc$malignant ~ predict(logit_rad, type = "response")))
+cat("Radius only:\t\t", auc_model_1, "\n")
+
+auc_model_2 <- auc(roc(bc$malignant ~ predict(logit_area, type = "response")))
+cat("Area only:\t", auc_model_2, "\n")
+
+auc_model_3 <- auc(roc(bc$malignant ~ predict(logit_text, type = "response")))
+cat("Texture only:\t", auc_model_3, "\n")
+```
+
+**Вывод**
+
+Среди многофакторных моделей незначительно лучше показывает себя модель, включающая текстуру и площадь, однако в целом можно говорить о равной эффективности мультифакторных моделей. Однофакторные показывают себя хуже. Гораздо хуже результат у модели, оперирующией единственным параметром Texture.
+
+# 3. Расчёт объёма выборки для исследования с регрессией Кокса
+
+**Задание:**
+
+Рассчитайте выборку для гипотезы equality для следующего исследования. Мы хотим сравнить новую терапию инфекции, присоединяющейся в больничных условиях у пациентов с ожогами, с золотым стандартом, основываясь на данных, анализируемых с помощью регрессии Кокса. Пусть отношение рисков «золотой стандарт / новая терапия», hazard ratio, HR = 2. Мы предполагаем, что 80% пациентов (d = 0,8) могут столкнуться с этим заболеванием. Соотношения групп терапии равны (p1 = p2 = 0,5).
+
+Воспользуйтесь следующими формулами:
+
+$$
+ n_1 = n_2 = \frac{(\frac{Z}2 + Z)^2}{d\,p_1 p_2[\ln(HR)]^2}
+$$
+
+$$
+ n = n_1 = n_2
+$$
+
+**Решение:**
+
+Сравниваем **новую терапию** и **золотой стандарт** при внутрибольничной инфекции у пациентов с ожогами. Предположения:
+
+-   Отношение рисков (gold standard / new) **HR = 2**.
+-   Доля пациентов, перенесших событие: *d* = 0,8.
+-   Равная рандомизация: *p₁* = *p₂* = 0,5.
+-   Двусторонний α = 0,05.
+
+```{r}
+alpha    <- 0.05
+Z <- qnorm(1 - alpha/2)
+HR       <- 2
+p1 <- p2 <- 0.5
+d        <- 0.8
+
+n_per  <- ((Z/2 + Z)^2) / (d * p1 * p2 * (log(HR))^2)
+
+cat(sprintf("Необходимый объём на группу: %.0f пациентов\n", ceiling(n_per)))
+cat(sprintf("Общий  размер выборки: %.0f пациентов\n", 2 * ceiling(n_per)))
+```
+
+При заданных параметрах требуется **≈ 100 пациентов в каждой группе (≈ 200 всего)** для обнаружения HR = 2 с мощностью 80 % на уровне значимости 5 %.
+
+**Дополнение**
+
+Формула из задания несколько упрощена.
+
+Проверим значения по оригинальной формуле (тест равенства рисков \~ лог‑ранг/Кокс, формула взята из <https://www.biostat.wisc.edu/~chappell/641/papers/paper31.pdf>):
+
+$$
+ n_1 = n_2 = \frac{(Z_{1-\alpha/2} + Z_{\beta})^2}{d\,p_1 p_2[\ln(HR)]^2}.
+$$ При тех же параметрах и β = 0,80.
+
+```{r}
+alpha    <- 0.05
+beta     <- 0.80
+Z_a_2 <- qnorm(1 - alpha/2)
+Z_b   <- qnorm(beta)
+HR       <- 2
+p1 <- p2 <- 0.5
+d        <- 0.8
+
+n_per  <- ((Z_a_2 + Z_b)^2) / (d * p1 * p2 * (log(HR))^2)
+
+cat(sprintf("Необходимый объём на группу: %.0f пациентов\n", ceiling(n_per)))
+cat(sprintf("Общий  размер выборки: %.0f пациентов\n", 2 * ceiling(n_per)))
+```
+
+Проверим результат через встроенную функцию библиотеки *powerSurvEpi*.
+
+```{r}
+# Проверим результат через встроенную функции *powerSurvEpi*
+n <- ssizeCT.default(
+  power = 0.8, 
+  k = 1,    
+  pC = 0.5,   
+  pE = 0.5,
+  RR = 2, 
+  alpha = 0.05
+)
+
+cat("Необходимый размер одной группы:", ceiling(n[['nE']]), "\n")
+cat("Общий размер выборки:", ceiling(n[['nE']] + n[['nC']]), "\n")
+```
